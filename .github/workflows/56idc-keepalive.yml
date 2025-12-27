@@ -1,4 +1,4 @@
-name: 56idc VPS Keep Alive
+name: 56idc VPS Login Reminder
 
 on:
   schedule:
@@ -6,49 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  keepalive:
+  reminder:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Login to 56idc via curl
-        run: |
-          echo "获取登录页面"
-
-          LOGIN_PAGE=$(curl -s -c cookies.txt https://56idc.net/login)
-          TOKEN=$(echo "$LOGIN_PAGE" | grep -oP 'name="token"\s+value="\K[^"]+')
-
-          if [ -z "$TOKEN" ]; then
-            echo "获取 token 失败"
-            exit 1
-          fi
-
-          echo "提交登录请求"
-
-          curl -s -b cookies.txt -c cookies.txt -X POST https://56idc.net/login \
-            -d "token=$TOKEN" \
-            -d "username=${{ secrets.IDC_USERNAME }}" \
-            -d "password=${{ secrets.IDC_PASSWORD }}" \
-            -d "rememberme=on"
-
-          echo "验证登录状态"
-
-          HTTP_CODE=$(curl -b cookies.txt -o /dev/null -s -w "%{http_code}" https://56idc.net/clientarea)
-
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "登录失败"
-            exit 1
-          fi
-
-      - name: Telegram Notify Result
-        if: always()
+      - name: Send Telegram Reminder
         run: |
           TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-
-          if [ "${{ job.status }}" = "success" ]; then
-            MSG="✅ 56idc VPS 保活成功\n🕒 北京时间：$TIME"
-          else
-            MSG="❌ 56idc VPS 保活失败\n🕒 北京时间：$TIME"
-          fi
+          MSG="🔔 56idc VPS 保活提醒\n\n请你手动登录一次官网以保持 VPS 活跃：\n👉 https://56idc.net/login\n\n🕒 北京时间：$TIME"
 
           curl -s -X POST https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage \
             -d chat_id=${{ secrets.TG_CHAT_ID }} \
