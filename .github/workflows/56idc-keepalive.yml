@@ -10,62 +10,46 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install dependencies
+      - name: Login to 56idc via curl
         run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser
+          echo "获取登录页面"
 
-      - name: Login and screenshot
+          LOGIN_PAGE=$(curl -s -c cookies.txt https://56idc.net/login)
+          TOKEN=$(echo "$LOGIN_PAGE" | grep -oP 'name="token"\s+value="\K[^"]+')
+
+          if [ -z "$TOKEN" ]; then
+            echo "获取 token 失败"
+            exit 1
+          fi
+
+          echo "提交登录请求"
+
+          curl -s -b cookies.txt -c cookies.txt -X POST https://56idc.net/login \
+            -d "token=$TOKEN" \
+            -d "username=${{ secrets.IDC_USERNAME }}" \
+            -d "password=${{ secrets.IDC_PASSWORD }}" \
+            -d "rememberme=on"
+
+          echo "验证登录状态"
+
+          HTTP_CODE=$(curl -b cookies.txt -o /dev/null -s -w "%{http_code}" https://56idc.net/clientarea)
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "登录失败"
+            exit 1
+          fi
+
+      - name: Telegram Notify Result
+        if: always()
         run: |
-          cat << 'EOF' > login.js
-          const puppeteer = require('puppeteer');
+          TIME=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
 
-          (async () => {
-            const browser = await puppeteer.launch({
-              headless: true,
-              args: ['--no-sandbox', '--disable-setuid-sandbox']
-            });
+          if [ "${{ job.status }}" = "success" ]; then
+            MSG="✅ 56idc VPS 保活成功\n🕒 北京时间：$TIME"
+          else
+            MSG="❌ 56idc VPS 保活失败\n🕒 北京时间：$TIME"
+          fi
 
-            const page = await browser.newPage();
-            await page.goto('https://56idc.net/login', { waitUntil: 'networkidle2' });
-
-            await page.type('input[name="username"]', process.env.IDC_USERNAME);
-            await page.type('input[name="password"]', process.env.IDC_PASSWORD);
-            await page.click('input[name="rememberme"]');
-
-            await Promise.all([
-              page.click('button[type="submit"]'),
-              page.waitForNavigation({ waitUntil: 'networkidle2' })
-            ]);
-
-            await page.goto('https://56idc.net/clientarea', { waitUntil: 'networkidle2' });
-
-            await page.screenshot({ path: 'login-success.png', fullPage: true });
-
-            await browser.close();
-          })();
-          EOF
-
-          npm init -y
-          npm install puppeteer
-          node login.js
-        env:
-          IDC_USERNAME: ${{ secrets.IDC_USERNAME }}
-          IDC_PASSWORD: ${{ secrets.IDC_PASSWORD }}
-
-      - name: Telegram Notify with Screenshot
-        if: success()
-        run: |
-          TIME=$(date '+%Y-%m-%d %H:%M:%S (UTC)')
-          curl -s -X POST https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendPhoto \
-            -F chat_id=${{ secrets.TG_CHAT_ID }} \
-            -F photo=@login-success.png \
-            -F caption="✅ 56idc VPS 保活成功\n🕒 时间：$TIME"
-
-      - name: Telegram Notify Failure
-        if: failure()
-        run: |
-          TIME=$(date '+%Y-%m-%d %H:%M:%S (UTC)')
           curl -s -X POST https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage \
             -d chat_id=${{ secrets.TG_CHAT_ID }} \
-            -d text="❌ 56idc VPS 保活失败\n🕒 时间：$TIME"
+            -d text="$MSG"
